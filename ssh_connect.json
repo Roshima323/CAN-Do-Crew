@@ -1,0 +1,19 @@
+{
+
+"ECU_IP":"192.168.2.2",
+"ECU_PORT": 22,
+"USERNAME":"root",
+"PASSWORD": "",
+"LOCAL_FILE": "recording.bytesoup",
+"REMOTE_FILE": "ota/target_dir/recording.bytesoup",
+"remote_app_path": "ota/target_dir",
+"start_scripts": [
+    "start.sh",
+    "start_mta_recording.sh"
+],
+"start_script":"start.sh",
+"recording_script": "start_mta_recording.sh",
+"COPY_DESTINATION": "D:\\Logs",
+"MAX_RETRIES": 3,
+"RETRY_DELAY ": 5 
+}
