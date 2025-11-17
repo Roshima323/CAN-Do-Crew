@@ -15,12 +15,12 @@ ssh_Cfg = Hf.ReadConfig(Hf.getRelativePath(ssh_ConfigFile)) # read the json inpu
 
 #arguments for ssh_connect 
 parser = argparse.ArgumentParser(description="SSH Controller Utility")
-parser.add_argument("--deploy", help="Path to application to deploy")
+parser.add_argument("--deploy", help="Copy and deploy applications to start bytesoup recording")
 parser.add_argument("--start-recording", action="store_true", help="Start ByteSoup recording")
 parser.add_argument("--stop-recording", action="store_true", help="Stop ByteSoup recording")
 parser.add_argument("--transfer", action="store_true", help="Transfer .bytesoup file")
 args = parser.parse_args()
-KNOWN_HOSTS_PATH = os.path.expanduser('~/.ssh/known_hosts')
+KNOWN_HOSTS_PATH = os.path.expanduser(sh_Cfg["KNOWN_HOSTS_PATH"]) #path where known hosts are stored
 
 def connect_to_ecu():
     """Establish SSH connection to QNX ECU with retry logic."""
@@ -29,10 +29,10 @@ def connect_to_ecu():
 
     host_keys = ssh.get_host_keys()
     if ssh_Cfg["ECU_IP"] in host_keys:
-        print(f"Host {ssh_Cfg["ECU_IP"]} found in known hosts. Using RejectPolicy.")
+        print(f"Host  found in known hosts. Using RejectPolicy.")
         ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
     else:
-        print(f"Host {ssh_Cfg["ECU_IP"]} NOT found in known hosts. Using AutoAddPolicy.")
+        print(f"Host NOT found in known hosts. Using AutoAddPolicy.")
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
 

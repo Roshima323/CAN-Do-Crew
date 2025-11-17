@@ -1,0 +1,13 @@
+Signal,Raw_value,Timestamp,Signal_value
+ESP_Long_ParkBrakeAvblStatus,,13689.55,0
+ESP_Long_ParkBrakeAvblStatus,,13690.06,2
+ESP_Long_ParkBrakeAvblStatus,,13690.278,3
+ESP_Long_ParkBrakeAvblStatus,,13690.450,0
+EHR_ReferenceLine_dx_19,,13800.55,0
+EHR_ReferenceLine_dx_19,,13801.10,102.3125
+EHR_ReferenceLine_dx_19,,13801.3,204.75
+EHR_ReferenceLine_dx_19,,13801.450,0
+EngineRPM,,13900.9,0
+EngineRPM,,13901.5,300
+EngineRPM,,13901.8,800
+EngineRPM,,13901.7,0

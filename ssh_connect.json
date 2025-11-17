@@ -20,5 +20,6 @@
 "recording_script": "start_mta_recording.sh",
 "COPY_DESTINATION": "D:\\Logs\\",
 "MAX_RETRIES": 3,
-"RETRY_DELAY ": 5 
+"RETRY_DELAY ": 5,
+"KNOWN_HOSTS_PATH": "'~/.ssh/known_hosts'"
 }
