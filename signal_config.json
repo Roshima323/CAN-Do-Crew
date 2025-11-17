@@ -1,0 +1,21 @@
+{
+    "cycles": 100,
+    "interval_ms": 10,
+    "signals": {
+        "ESP_Long_ParkBrakeAvblStatus": {
+            "min": 0,
+            "mid": 2,
+            "max": 3
+        },
+        "EHR_ReferenceLine_dx_19": {
+            "min": 0,
+            "mid": 102.3125,
+            "max": 204.75
+        },
+        "EngineRPM": {
+            "min": 0,
+            "mid": 300,
+            "max": 800
+        }
+    }
+}
