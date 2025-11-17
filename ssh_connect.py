@@ -1,27 +1,41 @@
 import time
 import hashlib
 import argparse
+import os
+import shutil
+import subprocess
 import HelperFunctions as Hf
-
-Hf.Check_Install("paramiko")
+Hf.Check_Install("paramiko") # install paramiko python package if it is missing.
 import paramiko      
 
 
-ssh_ConfigFile = 'ssh_connect.json' #Inputs for ssh connection
+ssh_ConfigFile = 'ssh_connect.json' #Inputs for ssh connection available in json
 ssh_Cfg = None
-ssh_Cfg = Hf.ReadConfig(Hf.getRelativePath(ssh_ConfigFile))
+ssh_Cfg = Hf.ReadConfig(Hf.getRelativePath(ssh_ConfigFile)) # read the json inputs to ssh_cfg
 
-parser = argparse.ArgumentParser(description="SSH ECU Utility")
+#arguments for ssh_connect 
+parser = argparse.ArgumentParser(description="SSH Controller Utility")
 parser.add_argument("--deploy", help="Path to application to deploy")
 parser.add_argument("--start-recording", action="store_true", help="Start ByteSoup recording")
 parser.add_argument("--stop-recording", action="store_true", help="Stop ByteSoup recording")
 parser.add_argument("--transfer", action="store_true", help="Transfer .bytesoup file")
 args = parser.parse_args()
+KNOWN_HOSTS_PATH = os.path.expanduser('~/.ssh/known_hosts')
 
 def connect_to_ecu():
     """Establish SSH connection to QNX ECU with retry logic."""
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.load_host_keys(KNOWN_HOSTS_PATH) #load known hosts to avoid fingerprint issue when connecting to the IP   
+
+    host_keys = ssh.get_host_keys()
+    if ssh_Cfg["ECU_IP"] in host_keys:
+        print(f"Host {ssh_Cfg["ECU_IP"]} found in known hosts. Using RejectPolicy.")
+        ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
+    else:
+        print(f"Host {ssh_Cfg["ECU_IP"]} NOT found in known hosts. Using AutoAddPolicy.")
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+
     for attempt in range(ssh_Cfg["MAX_RETRIES"]):
         try:
             ssh.connect(ssh_Cfg["ECU_IP"], port=ssh_Cfg["ECU_PORT"], username=ssh_Cfg["USERNAME"], password=ssh_Cfg["PASSWORD"] , timeout=10)
@@ -32,14 +46,55 @@ def connect_to_ecu():
             time.sleep(ssh_Cfg["RETRY_DELAY"])
     raise ConnectionError("Failed to connect to ECU after multiple attempts.")
 
-def deploy_application(ssh, app_path):
-    """Deploy application to ECU and run multiple shell scripts with retries and error handling."""
+
+def copy_applications(ssh):
+    """Copy multiple application files to ECU before deployment."""
     try:
         sftp = ssh.open_sftp()
-        sftp.put(app_path, ssh_Cfg["remote_app_path"])
+        remote_dir = ssh_Cfg["remote_app_dir"]
+        
+        # Ensure remote directory exists
+        try:
+            sftp.stat(remote_dir)
+        except FileNotFoundError:
+            ssh.exec_command(f"mkdir -p {remote_dir}")
+            print(f"✅ Created remote directory: {remote_dir}")
+
+        app_list = ssh_Cfg.get("applications", [])
+        if not app_list:
+            print("⚠️ No applications specified in config. Skipping copy.")
+            return
+
+        for app_path in app_list:
+            if not os.path.exists(app_path):
+                print(f"❌ Local file not found: {app_path}")
+                continue
+
+            remote_path = os.path.join(remote_dir, os.path.basename(app_path))
+            for attempt in range(ssh_Cfg["MAX_RETRIES"]):
+                try:
+                    print(f"🔁 Copying {app_path} → {remote_path} (Attempt {attempt+1})")
+                    sftp.put(app_path, remote_path)
+                    print(f"✅ Copied {app_path} to {remote_path}")
+                    break
+                except Exception as e:
+                    print(f"❌ Copy attempt {attempt+1} failed: {e}")
+                    time.sleep(ssh_Cfg["RETRY_DELAY"])
+            else:
+                print(f"❌ Failed to copy {app_path} after multiple attempts.")
+        sftp.close()
+    except Exception as e:
+        print(f"❌ Application copy failed: {e}")
+
+
+def deploy_application(ssh):
+    """Deploy application to ECU and run multiple shell scripts with retries and error handling."""
+    copy_applications(ssh) 
+    try:
+        sftp = ssh.open_sftp()    
+        sftp.put(ssh_Cfg["start_script"], ssh_Cfg["start_app_path"])
         sftp.close()
         print("✅ Application deployed to remote path.")
-
         script_list = ssh_Cfg.get("start_scripts", [])
 
         if not isinstance(script_list, list) or not script_list:
@@ -77,10 +132,10 @@ def start_recording(ssh):
     """Start ByteSoup recording with error handling."""
     try:
         sftp = ssh.open_sftp()
-        sftp.put(app_path, ssh_Cfg["remote_app_path"])
+        sftp.put(ssh_Cfg["recording_script"], ssh_Cfg["recording_app_path"])
         sftp.close()
 
-        shell_script_path = ssh_Cfg.get(ssh_Cfg["recording_script"])
+        shell_script_path = ssh_Cfg["recording_app_path"]
         if not shell_script_path or not shell_script_path.strip():
             print("⚠️ Shell script path is missing or invalid in configuration. Skipping execution.")
             return
@@ -96,26 +151,37 @@ def start_recording(ssh):
     except Exception as e:
         print(f"❌ Failed to start recording: {e}")
 
+def kill_process_by_name(process_name):
+    try:
+        subprocess.run(['taskkill', '/F', '/IM', process_name], check=True)
+        print(f"Process {process_name} has been successfully killed.")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to kill process {process_name}. Error: {e}")
 
-def stop_recording():
+def stop_recording(ssh):
     for attempt in range(ssh_Cfg["MAX_RETRIES"]):
         try:
             print(f"🔁 Attempt {attempt+1} to stop recording...")
-            ssh = connect_to_ecu()
             channel = ssh.get_transport().open_session()
             channel.get_pty()
             channel.invoke_shell()
 
-            print("Sending Ctrl+C...")
+            # Send Ctrl+C to remote process
+            print("Sending Ctrl+C to remote process...")
             channel.send('\x03')  # Ctrl+C
             time.sleep(1)
 
-            output = channel.recv(1024).decode()
-            print("📋 Command output after Ctrl+C:\n", output)
+            output = channel.recv(1024).decode(errors='ignore')
+            print("📋 Remote output after Ctrl+C:\n", output)
 
             channel.close()
             ssh.close()
-            print("✅ Recording stopped and SSH connection closed.")
+            print("✅ SSH connection closed.")
+
+            # Execute taskkill locally
+            print("Executing taskkill locally...")
+            kill_process_by_name("OpenConsole.exe")
+            print("📋 Local taskkill output:\n", result.stdout or result.stderr)
             return
         except Exception as e:
             print(f"❌ Attempt {attempt+1} failed: {e}")
@@ -123,9 +189,9 @@ def stop_recording():
 
     print("❌ All attempts to stop recording failed.")
 
+
 def transfer_file(ssh):
-    """Transfer .bytesoup file with retry, integrity check, and user-defined copy path."""
-    custom_path = ssh_Cfg["COPY_DESTINATION"]
+    """Transfer .bytesoup file with retry"""
 
     for attempt in range(ssh_Cfg["MAX_RETRIES"]):
         try:
@@ -133,14 +199,6 @@ def transfer_file(ssh):
             sftp.get(ssh_Cfg["REMOTE_FILE"], ssh_Cfg["LOCAL_FILE"])
             sftp.close()
             print("✅ File transferred successfully.")
-
-            verify_file_integrity(ssh_Cfg["LOCAL_FILE"])
-
-            if custom_path:
-                shutil.copy2(ssh_Cfg["LOCAL_FILE"], custom_path)
-                print(f"✅ File copied to {custom_path}")
-            else:
-                print("⚠️ No destination path provided. Skipping copy.")
             return
         except Exception as e:
             print(f"❌ File transfer attempt {attempt+1} failed: {e}")
@@ -153,7 +211,7 @@ if __name__ == "__main__":
     try:
         ssh = connect_to_ecu()
         if args.deploy:
-            deploy_application(ssh, ssh_Cfg["remote_app_path"])
+            deploy_application(ssh)
         if args.start_recording:
             start_recording(ssh)
         if args.stop_recording:
@@ -166,6 +224,3 @@ if __name__ == "__main__":
         if ssh:
             ssh.close()
             print("✅ SSH connection closed.")
-
-
-
